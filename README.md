@@ -21,6 +21,11 @@ Share a link from another app and save it into a space as a pinned tab or a norm
 
 Look something up in a small in-app browser without leaving Z-Sync.
 
+On a long page, scroll down to hide the browser controls and status bar for
+more reading space. Scroll up or tap the small arrow at the bottom to bring
+the controls back. They also return when a page needs keyboard input, or when
+you open another page or the page overview.
+
 <img src=".github/assets/quick-browser.png" alt="Quick browser" width="360">
 
 ## Repo

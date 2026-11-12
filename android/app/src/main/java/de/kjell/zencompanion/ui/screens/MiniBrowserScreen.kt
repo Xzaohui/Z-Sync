@@ -25,6 +25,7 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Box
@@ -114,6 +115,8 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.Density
@@ -122,6 +125,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import de.kjell.zencompanion.R
 import de.kjell.zencompanion.util.FriendlyError
 import de.kjell.zencompanion.sync.ZenSpaces
@@ -622,6 +626,7 @@ fun MiniBrowserScreen(
                 chromeAlpha = { chromeAlpha.value },
                 // A new page flies in on its own color, not on its way there.
                 colorArrives = excludedCardId != null,
+                overviewShown = showOverview,
                 onPullStart = ::beginPagePull,
                 onPullChange = ::updatePagePull,
                 onPullEnd = ::endPagePull,
@@ -803,6 +808,7 @@ private fun BrowserPageScreen(
     chromeAlpha: () -> Float,
     /** The page's color is there at once, with no blend from the page before. */
     colorArrives: Boolean,
+    overviewShown: Boolean,
     onPullStart: () -> Unit,
     onPullChange: (Offset) -> Unit,
     onPullEnd: (PagePullEnd) -> Unit,
@@ -832,12 +838,19 @@ private fun BrowserPageScreen(
 
     // Scroll-driven bar: tucks away on the way down, returns on the way up.
     var barHidden by remember { mutableStateOf(false) }
+    val imeVisible = WindowInsets.isImeVisible
     // Written on every scroll packet; a state write would recompose the screen.
     val scroll = remember { ScrollTracker() }
     val onPageScroll: (Int) -> Unit = { scrollY ->
         val delta = scrollY - scroll.lastY
         scroll.lastY = scrollY
         when {
+            imeVisible || overviewShown || state.isAddressFocused || state.menuExpanded ||
+                state.readerArticle != null || state.findVisible || state.pageError != null ||
+                state.notice != null || state.showPinBanner -> {
+                scroll.downRun = 0
+                barHidden = false
+            }
             // A short page, or the top of a long one, always keeps the bar.
             scrollY <= 40 -> {
                 scroll.downRun = 0
@@ -981,7 +994,15 @@ private fun BrowserPageScreen(
     val shownBgColor = if (colorJumps || colorArrives) targetBg else animatedBgColor
 
     // The bar stays put while a sheet, a reader, the find bar or a banner is up.
+    LaunchedEffect(imeVisible, overviewShown) {
+        if (imeVisible || overviewShown) {
+            barHidden = false
+            scroll.downRun = 0
+        }
+    }
     val barVisible = !barHidden ||
+        overviewShown ||
+        imeVisible ||
         state.isAddressFocused ||
         state.menuExpanded ||
         state.showPinBanner ||
@@ -998,6 +1019,19 @@ private fun BrowserPageScreen(
     // The status and navigation bars sit on the same color. Restored on close,
     // so the spaces screen keeps its own.
     val view = LocalView.current
+    // Only the reading page hides the status bar. Restore it when leaving the
+    // page as well as when its controls return.
+    DisposableEffect(view) {
+        val window = (view.context as? Activity)?.window
+        val bars = window?.let { WindowCompat.getInsetsController(it, view) }
+        onDispose { bars?.show(WindowInsetsCompat.Type.statusBars()) }
+    }
+    LaunchedEffect(view, barVisible) {
+        val window = (view.context as? Activity)?.window
+        val bars = window?.let { WindowCompat.getInsetsController(it, view) }
+        if (barVisible) bars?.show(WindowInsetsCompat.Type.statusBars())
+        else bars?.hide(WindowInsetsCompat.Type.statusBars())
+    }
     DisposableEffect(view, barIsDark) {
         val window = (view.context as? Activity)?.window
         val bars = window?.let { WindowCompat.getInsetsController(it, view) }
@@ -1125,7 +1159,6 @@ private fun BrowserPageScreen(
         ) {
             // A page field keeps the chrome where it is (behind the keys) and
             // gets its own Done control above them, as iOS does.
-            val imeVisible = WindowInsets.isImeVisible
             val imeHeight = with(LocalDensity.current) {
                 WindowInsets.ime.getBottom(this).toDp()
             }
@@ -1257,6 +1290,32 @@ private fun BrowserPageScreen(
             }
 
                 Spacer(Modifier.height(reservedBottom))
+            }
+
+            if (!barVisible) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = barBottomGap(navigationBarInset))
+                        .size(48.dp)
+                        .semantics { contentDescription = "Show browser controls" }
+                        .clickable {
+                            barHidden = false
+                            scroll.downRun = 0
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Box(
+                        modifier = Modifier.size(30.dp).background(barColor.copy(alpha = 0.9f), CircleShape),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.KeyboardArrowUp,
+                            contentDescription = null,
+                            tint = if (barIsDark) Color.White else Color.Black,
+                        )
+                    }
+                }
             }
 
             AnimatedVisibility(
